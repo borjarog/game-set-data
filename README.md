@@ -77,9 +77,7 @@ All data comes from the **[Jeff Sackmann tennis_atp repository](https://github.c
   - **Nadal → Clay**  
   - **Federer → Grass**  
   - **Djokovic → Versatility across all surfaces**  
-- Interactive **Shiny apps** for performance exploration:  
-  - [Player performance over time](https://raseval1.shinyapps.io/generador/)  
-  - [Performance by surface](https://raseval1.shinyapps.io/superficies/)  
+- Interactive **Shiny apps** for performance exploration.  
 
 ## Repository Structure
 
