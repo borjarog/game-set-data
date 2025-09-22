@@ -1,0 +1,624 @@
+---
+title: "**Exploratory Data Analysis**"
+output:
+  html_document:
+    number_sections: false
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 6
+    mathjax: null
+    css: doc.css
+  pdf_document:
+    toc: true
+    toc_depth: '6'
+---
+
+#### **Table of Contents**:
+
+1.  Loading the libraries
+2.  Loading match data
+    -   2.1. Cleaning, transformation, and missing values
+    -   2.2. Creation of variables and measures
+3.  Exploratory Data Analysis
+    -   3.1. Descriptive analysis
+    -   3.2. Wins by year and player
+    -   3.3. Number of *aces* or direct serve points by surface type
+    -   3.4. Number of wins by year and country
+    -   3.5. Number of wins by year, player, and tournament type
+    -   3.6. Percentage of wins by year, player, and surface
+    -   3.7. Effectiveness by year, player, and surface
+    -   3.8. Distribution of the percentage of points won on first and second serves
+4.  Loading player data
+    -   4.1. Best servers
+    -   4.2. Best countries
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. **Loading the libraries**
+
+The R libraries that we are going to use are imported below:
+
+```{r importar librerías, warning = FALSE, message = FALSE}
+library(ggplot2)
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(writexl)
+library(gridExtra)
+library(grid)
+library(knitr)
+```
+
+These libraries will help us perform data visualization tasks, manipulate, transform, and analyze the data.
+
+## 2. **Loading match data**
+
+We will start by loading the data from the file atp_matches_2000_2023.csv as part of our main dataset:
+
+```{r carga datos sin limpiar y tansformar}
+datos = read.csv("../data/raw-data/atp_matches_2000_2023.csv")
+```
+
+The data file has `r nrow(datos)` rows and `r ncol(datos)` columns. Therefore, from the year 2000 to 2023, we have data for `r nrow(datos)` matches, since each row represents a match with information about the winner and the loser. The meaning of each variable and its type is described in the attached file **Appendix Variables - Final Dataset.pdf**. The structure of the dataset is as follows:
+
+```{r mostrar y analizar datos sin limpiar y tansformar 1, echo = FALSE}
+print(str(datos))
+```
+
+#### 2.1. **Cleaning, transformation, and missing values**
+
+As mentioned, each row represents a match and contains data about both the loser and the winner. However, to make the analysis easier, we will transform the dataset so that each match is represented by two rows. In the first row we will include the match data and the winner’s data, and in the second row the match data and the loser’s data. We will start by defining two variables: one that contains the variables related to the winning player, and another that contains the variables related to the losing player:
+
+```{r lyt 1}
+variables_ganador = c("tourney_id", "tourney_name", "surface", "draw_size",
+                      "tourney_level", "tourney_date", "match_num","score", "best_of",
+                      "round", "minutes", "winner_id", "winner_seed", "winner_entry", "winner_name", "winner_hand",
+                      "winner_ht", "winner_ioc", "winner_age",  "w_ace", "w_df", "w_svpt", "w_1stIn",
+                      "w_1stWon", "w_2ndWon", "w_SvGms", "w_bpSaved", "w_bpFaced",
+                      "winner_rank", "winner_rank_points")
+
+variables_perdedor = c("tourney_id", "tourney_name", "surface", "draw_size",
+                       "tourney_level", "tourney_date", "match_num","score", "best_of",
+                       "round", "minutes", "loser_id", "loser_seed", "loser_entry", "loser_name", "loser_hand",
+                       "loser_ht", "loser_ioc", "loser_age",  "l_ace", "l_df", "l_svpt", "l_1stIn",
+                       "l_1stWon", "l_2ndWon", "l_SvGms", "l_bpSaved", "l_bpFaced",
+                       "loser_rank", "loser_rank_points")
+```
+
+Next, with the following code, we will create two variables (`datos_ganador`, `datos_perdedor`) that will select the columns found in the vectors of the two previously defined variables for winner and loser, and we will rename the columns that begin with the corresponding prefixes ("winner\_", "w\_", "loser\_", "l\_") by removing those prefixes. Afterwards, we add a new column called **"player_type"**, which will indicate whether the player was the **winner** or the **loser** of the match. This will be stored in two different *data frames*.
+
+```{r lyt 2}
+datos_ganador = datos %>% select(all_of(variables_ganador)) %>%
+  rename_with(~str_replace(., "^(winner_|w_)", ""), starts_with(c("winner_", "w_"))) %>%
+  mutate(player_type = "winner")
+
+datos_perdedor = datos %>% select(all_of(variables_perdedor)) %>%
+  rename_with(~str_replace(., "^(loser_|l_)", ""), starts_with(c("loser_", "l_"))) %>%
+  mutate(player_type = "loser")
+```
+
+Finally, we combine the two previous *data frames* (`datos_ganador`, `datos_perdedor`) into a single one. This *data frame*, called **datos_final**, will contain the separated data of the winner and the loser of each match. In addition, we sort it by the tournament identifier **"tourney_id"** and by the match number **"match_num"**. On the other hand, we will remove the column or variable **"entry"**, which represents the player's mode of entry into the tournament. Since we do not consider it important, we will drop it from the dataset:
+
+```{r lyt 3}
+datos_final = bind_rows(datos_ganador, datos_perdedor)
+datos_final = datos_final %>% arrange(tourney_id, match_num)
+datos_final = subset(datos_final, select = -entry)
+```
+
+Next, from the variable **"tourney_date"**, we will create two columns that indicate the year and the month of the match:
+
+```{r lyt 5}
+datos_final$tourney_date = as.character(datos_final$tourney_date)
+datos_final$Year = as.numeric(as.character(substr(datos_final$tourney_date, 1, 4)))
+datos_final$Month = as.numeric(as.character(substr(datos_final$tourney_date, 6, 6)))
+```
+
+The structure of the final dataset is as follows:
+
+```{r lyt 4, echo = FALSE}
+print(str(datos_final))
+```
+
+Our final dataset has `r nrow(datos_final)` rows and `r ncol(datos_final)` columns. This makes sense because it is double the number of rows we had before, as each match is now represented by two rows instead of one. On the other hand, we have reduced the number of variables from `r ncol(datos)` to `r ncol(datos_final)`, although the information has been preserved through the transformation.
+
+Now, let’s check how many missing values there are in our data by variable. We will create a new *data frame* that contains the number of null values per variable in the dataset:
+
+```{r flt 2}
+valores_faltantes = data.frame(Variable = names(datos_final), Missing_Values = sapply(datos_final, function(x) sum(is.na(x))), row.names = c(1:32))
+valores_faltantes_con_nulos = valores_faltantes[valores_faltantes$Missing_Values > 0, ]
+print(knitr::kable(valores_faltantes_con_nulos[order(valores_faltantes_con_nulos$Missing_Values, decreasing = TRUE),]))
+```
+
+As we can observe, the variable **"seed"** has 97,353 missing or null values. Since this variable contains the pre-assigned position in the competition draw for the player, we do not consider it an interesting or relevant variable for the analysis. Therefore, we will remove this column from the dataset:
+
+```{r flt 3}
+datos_final = subset(datos_final, select = -seed)
+```
+
+Now let’s check if we can detect for which tournaments these missing values occur. We will test with the null values:
+
+```{r flt 4}
+datos_con_nulos_minutos = subset(datos_final, is.na(minutes))
+nulos_por_torneo_minutos = table(datos_con_nulos_minutos$tourney_level)
+```
+
+```{r flt 4.5, echo = FALSE}
+print(nulos_por_torneo_minutos)
+```
+
+```{r flt 5}
+datos_con_nulos_aces = subset(datos_final, is.na(ace))
+nulos_por_torneo_aces = table(datos_con_nulos_aces$tourney_level)
+```
+
+```{r flt 5.5, echo = FALSE}
+print(nulos_por_torneo_aces)
+```
+
+At first glance, we can see that tournaments with level **"D"**, that is, Davis Cup tournaments, are the ones with the most missing values in several columns. This type of tournament is not among the most important, so we are not concerned about having so many null values for it. However, we will remove the rows where the variable **"tourney_level"** has the value **"D"**:
+
+```{r flt 6}
+datos_final = datos_final[datos_final$tourney_level != "D",]
+```
+
+Now we will remove the rows that contain null values in any of the following variables: `r colnames(datos_final[,18:26])`. This is because, for the observations where one of those variables has a null value, all the others have null values as well.
+
+```{r flt 6.5}
+datos_final = datos_final[!is.na(datos_final$ace), ]
+```
+
+Now let’s look at the observations we have for each type of surface:
+
+```{r flt 8.5}
+count_por_superficie = datos_final %>% group_by(surface) %>% summarise(valores = n())
+```
+
+```{r flt 8.75, echo = FALSE}
+print(count_por_superficie)
+```
+
+As we can see, there are `r count_por_superficie$valores[count_por_superficie$surface == "Carpet"]` values for the "Carpet" surface. Since there are few observations of this type of surface and its use ended in 2009, it is not very relevant for this analysis. Therefore, we will remove it from the dataset.
+
+```{r flt 8.76}
+datos_final = datos_final[datos_final$surface != "Carpet",]
+```
+
+Let’s check the null values in our final dataset:
+
+```{r flt 9}
+valores_faltantes = data.frame(Variable = names(datos_final), Missing_Values = sapply(datos_final, function(x) sum(is.na(x))), row.names = c(1:31))
+valores_faltantes_con_nulos = valores_faltantes[valores_faltantes$Missing_Values > 0, ]
+valores_faltantes_con_nulos = valores_faltantes_con_nulos[order(valores_faltantes_con_nulos$Missing_Values, decreasing = TRUE), ]
+```
+
+```{r flt 9.5, echo = FALSE, results = TRUE}
+knitr::kable(valores_faltantes_con_nulos)
+```
+
+As we can see, we will only have null values in the variables **minutes**, **ht**, **age**, **rank**, and **rank_points**.
+
+#### 2.3. **Creation of variables and measures**
+
+In addition to creating the variables `r colnames(datos_final[,29:31])`, we will create new variables that we will later use in the exploratory analysis. We will start by creating three variables that will contain, for each match and player, the percentage of points won on the first serve, the percentage of points won on the second serve, and the percentage of first serves made:
+
+```{r cvm1, warning = FALSE}
+datos_final = datos_final %>% mutate(`%_pw_1st_serve` = ifelse(`1stIn` > 0, `1stWon` / `1stIn` * 100, 0))
+datos_final = datos_final %>% mutate(`%_pw_2nd_serve` = ifelse((svpt - `1stIn` - df) > 0, (`2ndWon` / (svpt - `1stIn` - df)) * 100, 0))
+datos_final = datos_final %>% mutate(`%1stIn` = ifelse(`1stIn` > 0, (`1stIn` / svpt ) * 100,0))
+```
+
+## 3. **Exploratory Data Analysis**
+
+#### 3.1. **Descriptive analysis**
+
+We will begin with a brief descriptive analysis of some of our variables:
+
+```{r eda0, warning = FALSE, fig.width=15, fig.height = 10}
+variables_eda1 = c("age", "svpt", "`1stIn`", "`1stWon`", "`2ndWon`", "minutes")
+
+plot_histogram = function(var) {
+  ggplot(datos_final, aes_string(x = var)) +
+    geom_histogram(bins = 30, fill = "blue", color = "black") +
+    labs(title = paste("Distribution of", var),
+         x = var,
+         y = "Frequency") +
+    theme_minimal()
+}
+histograms = lapply(variables_eda1, plot_histogram)
+gridExtra::grid.arrange(grobs = histograms, ncol = 2)
+```
+
+Explanations:
+
+-   Distribution of **"age"**: The distribution appears approximately normal and centered around 27 years old, suggesting that most tennis players are around that age.
+
+-   Distribution of **"svpt"** (number of serve points): Most players seem to have a number of serve points ranging between 50 and 150.
+
+-   Distribution of **"1stIn"** (number of valid first serves): The distribution is right-skewed, with most players having between 0 and 100 valid first serves. The distribution is similar to **"1stWon"** (number of first serves won).
+
+-   Distribution of **"2ndWon"** (number of points won on the second serve): Most players win between 0 and 25 points with their second serve.
+
+-   Distribution of **"minutes"** (match duration in minutes): Most matches last around 2 hours.
+
+#### 3.2. **Number of wins per year and player**
+
+Now we will create a plot that shows the number of wins per year achieved by the 10 players with the most wins in our dataset:
+
+```{r eda1, warning = FALSE}
+victorias_tenistas = datos_final %>% filter(player_type == "winner") %>% group_by(Year, name) %>% summarise(victorias = n(), .groups = 'drop')
+top_tenistas = victorias_tenistas %>% group_by(name) %>% summarise(total_victorias = sum(victorias), .groups = 'drop') %>% top_n(10, total_victorias)
+victorias_top_tenistas = victorias_tenistas %>% filter(name %in% top_tenistas$name)
+```
+
+```{r eda2, warning = FALSE, fig.width = 10, fig.height = 5, fig.align = "center"}
+ggplot(victorias_top_tenistas, aes(x = Year, y = victorias, color = name)) + geom_line() + labs(title = "Wins by year and player",
+                                                                                      x = "Year",
+                                                                                      y = "Number of wins",
+                                                                                      color = "Player") +
+  theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_continuous(breaks = seq(min(victorias_top_tenistas$Year), max(victorias_top_tenistas$Year), by = 1)) + geom_line(size = 1)
+```
+
+We can clearly see how most players experience fluctuations in the number of wins over the years, which is normal in a sports career due to factors such as physical condition, injuries, or streaks. Some players show performance peaks in certain years, which could correspond to their best seasons. For example, we can observe that players like Novak Djokovic, Rafael Nadal, and Roger Federer have multiple years with a high number of wins, which is indicative of their success and consistency in this sport. Players whose lines start later in the chart, such as Marin Cilic, probably began their professional careers after the year 2000, while those whose lines end before 2023 may have retired or reduced their participation in tournaments, such as Roger Federer.
+
+#### 3.3. **Number of *aces* or direct serve points by surface type**
+
+We will now create a plot or visualization that shows the distribution of the number of "aces" by surface type:
+
+```{r eda3, warning = FALSE, fig.width = 8, fig.height = 5, fig.align = "center"}
+ggplot(datos_final, aes(x = surface, y = ace, fill = surface)) + geom_boxplot() + labs(title = "Distribution of aces by surface type",
+                                                                                       x = "Type of surface",
+                                                                                       y = "Number of aces") + theme_minimal()
+```
+
+It can be observed that the average number of direct serve points (aces) is lower and shows less variability on clay compared to grass and hard courts, indicating that aces are less common on clay. Grass courts present a wider distribution, suggesting greater variability in the number of aces on this surface, probably due to the higher speed and lower friction that favor powerful serves. Hard courts show moderate dispersion and an average higher than clay but lower than grass, reflecting a balance in the frequency of aces among the three surfaces.
+
+#### 3.4. **Number of wins per year and country**
+
+We will now create a plot that shows the total number of wins distributed by players’ countries and by year, selecting the 10 countries with the most wins:
+
+```{r eda4, warning = FALSE}
+victorias = datos_final %>% filter(player_type == "winner") %>% group_by(Year, ioc) %>% summarise(victories = n(), .groups = 'drop')
+top_paises = victorias %>% group_by(ioc) %>% summarise(total_victories = sum(victories), .groups = 'drop') %>% top_n(10, total_victories)
+victorias_top = victorias %>% filter(ioc %in% top_paises$ioc)
+```
+
+```{r eda5, warning = FALSE, fig.width = 10, fig.height = 5, fig.align = "center"}
+ggplot(victorias_top, aes(x = Year, y = victories, color = ioc)) + geom_line() + labs(title = "Won Matches by Year and Country",
+                                                                                      x = "Year",
+                                                                                      y = "Number of wins",
+                                                                                      color = "Country") +
+  theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_continuous(breaks = seq(min(victorias_top$Year), max(victorias_top$Year), by = 1)) + geom_line(size = 1)
+```
+
+We can observe significant variations in the number of wins from year to year, suggesting changes in performance or in the number of active high-level players from each country. Some countries, such as Spain and Switzerland, show sharp peaks in certain years, which may indicate periods of dominance in the sport, possibly due to high-performing individual players during those times. The noticeable decline in wins for some countries in recent years could reflect generational transitions among players or variations in tournament participation. The chart also reflects the competitiveness of world tennis, with several countries reaching high numbers of wins at different moments, such as the United States at present.
+
+#### 3.5. **Number of wins per year, player, and tournament type**
+
+Next, we build a function that creates a plot showing the number of wins of a player per year and by tournament type.
+
+```{r eda6, warning = FALSE}
+plot_victorias_tenista_por_torneo = function (tenista, datos_final) {
+    tenista_victorias = datos_final %>% filter(name == tenista & player_type == "winner") %>% group_by(Year, tourney_level) %>%
+                         summarise(victorias = n(), .groups = 'drop')
+    ggplot(tenista_victorias, aes(x = Year, y = victorias, color = tourney_level)) +
+      geom_line(size = 0.8) +
+      scale_x_continuous(breaks = seq(min(tenista_victorias$Year), max(tenista_victorias$Year), by = 1)) +
+      scale_color_manual(values = c("A" = "blue", "F" = "red", "G" = "green", "M" = "orange"),
+                         labels = c("ATP", "Finales de Tour", "Grand Slam", "Masters")) +
+      labs(title = paste("Wins by year and type of tournament by", tenista),
+           x = "Year",
+           y = "Number of wins",
+           color = "Type of tournament") +
+      theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+```
+
+```{r eda7, warning = FALSE, fig.width = 10, fig.height = 8, fig.align = "center", echo = FALSE}
+p1 = plot_victorias_tenista_por_torneo("Rafael Nadal", datos_final = datos_final)
+p2 = plot_victorias_tenista_por_torneo("Roger Federer", datos_final = datos_final)
+p3 = plot_victorias_tenista_por_torneo("Novak Djokovic", datos_final =  datos_final)
+gridExtra::grid.arrange(p1,p2,p3,nrow = 3)
+```
+
+The chart shows the wins per year and tournament level of three outstanding players: Rafael Nadal, Roger Federer, and Novak Djokovic. It can be seen that their performances vary over the years across different types of tournaments, classified as ATP, Tour Finals, Grand Slams, and Masters. Rafael Nadal particularly stands out in Grand Slam tournaments. Roger Federer shows a more consistent performance over time with wins spread across the different levels, and Novak Djokovic displays an upward trend in Grand Slams as his career progresses. The lines representing Grand Slams tend to be the highest for all three players, highlighting their dominance in the most prestigious tournaments.
+
+#### 3.6. **Win percentage per year, player, and surface**
+
+We will now define a function that creates a plot showing the number of wins of a player per year and by surface type.
+
+```{r eda8, warning = FALSE}
+plot_victorias_tenista_por_superficie = function (tenista, datos_final){
+    tenista_victorias_superficie = datos_final %>%
+      filter(name == tenista & player_type == "winner") %>%
+      group_by(Year, surface) %>%
+      summarise(victories = n(), .groups = 'drop')
+
+    tenista_derrotas_superficie = datos_final %>%
+      filter(name == tenista & player_type == "loser") %>%
+      group_by(Year, surface) %>%
+      summarise(derrotas = n(), .groups = 'drop')
+
+    tenista_porcentaje_victorias_superficie = full_join(tenista_victorias_superficie, tenista_derrotas_superficie, by = c("Year", "surface")) %>%
+      replace_na(list(victories = 0, derrotas = 0)) %>%
+      mutate(total_partidos = victories + derrotas,
+             porcentaje_victorias = ifelse(total_partidos > 0, (victories / total_partidos) * 100, 0))
+    ggplot(tenista_porcentaje_victorias_superficie, aes(x = Year, y = porcentaje_victorias, color = surface)) +
+    geom_line(size = 0.8) +
+    scale_x_continuous(breaks = seq(min(tenista_porcentaje_victorias_superficie$Year), max(tenista_porcentaje_victorias_superficie$Year), by = 1)) +
+    labs(title = paste("Percentage of wins by year and surface by", tenista),
+       x = "Year",
+       y = "Wins percentage",
+       color = "Surface") +
+    theme_minimal()
+}
+```
+
+```{r eda9,warning = FALSE, fig.width = 10, fig.height = 8, fig.align = "center", echo = FALSE}
+p1 = plot_victorias_tenista_por_superficie("Rafael Nadal", datos_final)
+p2 = plot_victorias_tenista_por_superficie("Roger Federer", datos_final)
+p3 = plot_victorias_tenista_por_superficie("Novak Djokovic", datos_final)
+gridExtra::grid.arrange(p1,p2,p3,nrow = 3)
+```
+
+In this chart, Nadal stands out particularly on clay courts, showing a consistently high win percentage, which reflects his well-known dominance on this surface. Federer and Djokovic have a more balanced performance across surfaces, although Federer has a slight edge on grass, highlighting his skill on this fast surface. Djokovic, on the other hand, shows a remarkable ability to maintain a high win percentage on all surfaces, emphasizing his versatility as a player.
+
+#### 3.7. **Effectiveness per year, player, and surface**
+
+Next, we will create a function similar to the previous one, but instead of the number of wins, we will calculate the effectiveness in percentage for each player and surface type:
+
+```{r eda10, warning = FALSE}
+plot_efectividad = function(jugador, datos_final) {
+  victorias = datos_final %>% filter(name == jugador & player_type == "winner") %>% count(Year, surface, name = "victorias")
+  derrotas = datos_final %>% filter(name == jugador & player_type == "loser") %>% count(Year, surface, name = "derrotas")
+
+  efectividad = full_join(victorias, derrotas, by = c("Year", "surface")) %>%
+    replace_na(list(victorias = 0, derrotas = 0)) %>%
+    mutate(total_partidos = victorias + derrotas, ef = ifelse(total_partidos > 0, victorias / total_partidos, 1))
+
+  ggplot(efectividad, aes(x = Year, y = ef, color = surface)) +
+    geom_point(size = 2) + scale_y_continuous(limits = c(-0.1, 1.2)) +
+    labs(
+      title = paste(jugador, "- Effectiveness"),
+      x = "Year",
+      y = "Effectiveness",
+      color = "Surface"
+    )
+}
+```
+
+```{r eda11, warning = FALSE, fig.width = 15, fig.height = 5, fig.align = "center", echo = FALSE}
+p1 = plot_efectividad("Rafael Nadal", datos = datos_final)
+p2 = plot_efectividad("Novak Djokovic", datos = datos_final)
+p3 = plot_efectividad("Roger Federer", datos = datos_final)
+gridExtra::grid.arrange(p1,p2,p3, nrow = 1)
+```
+
+We observe again the same pattern as in the previous chart. In the case of Rafa Nadal, there is a greater concentration of points on clay courts above 0.8, which indicates high effectiveness, consistent with his reputation as the "King of Clay." Djokovic shows effectiveness more evenly distributed across all surfaces. For Federer, there is notable effectiveness on grass courts.
+
+#### 3.8. **Distribution of the percentage of points won on first and second serves**
+
+Next, we will create charts showing the distribution of points won on first and second serves, depending on whether the player is the winner or the loser:
+
+```{r eda13, warning = FALSE, fig.width = 25, fig.height = 20, fig.align = 'center'}
+p4 = ggplot(datos_final, aes(x = player_type, y = `%_pw_1st_serve`, fill = player_type)) + 
+  geom_boxplot() + 
+  labs(
+    title = "Distribution of the percentage of points won on the first serve by winner and loser", 
+    x = "Player type",
+    y = "Percentage of points won on the first serve"
+  ) + 
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(size = 25, face = "bold"),
+    axis.title.x = element_text(size = 20, face = "bold"),
+    axis.title.y = element_text(size = 20, face = "bold"),
+    axis.text.x = element_text(size = 25),
+    axis.text.y = element_text(size = 25),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 20)
+  )
+
+p5 = ggplot(datos_final, aes(x = player_type, y = `%_pw_2nd_serve`, fill = player_type)) + 
+  geom_boxplot() + 
+  labs(
+    title = "Distribution of the percentage of points won on the second serve by winner and loser", 
+    x = "Player type",
+    y = "Percentage of points won on the second serve"
+  ) + 
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(size = 25, face = "bold"),
+    axis.title.x = element_text(size = 20, face = "bold"),
+    axis.title.y = element_text(size = 20, face = "bold"),
+    axis.text.x = element_text(size = 25),
+    axis.text.y = element_text(size = 25),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 20)
+  )
+
+gridExtra::grid.arrange(p4, p5, nrow = 2)
+```
+
+The charts above show the distribution of the percentage of points won on the first and second serve by winners and losers. On the first serve, both winners and losers show a wide distribution of effectiveness, but winners generally win a higher percentage of points on their first serve than losers. This pattern is repeated on the second serve, although with a lower median for both, indicating that points won on the second serve are generally fewer than on the first serve.
+
+## 4. **Loading player data**
+
+We begin by assigning the dataset **datos_final** to the variable **matches** and filtering out the rows that have missing values in **m**. We then load the data from the file **atp_players.csv** as another part of our main dataset. Likewise, we remove the columns that are not relevant for our analysis, which are: **appear** (auxiliary binary column that helped us select players who played at least one singles match on the tour between 2000 and 2023), **dob** (doubles ranking), and **wikidata_id** (Wikipedia database ID).
+
+```{r cars}
+matches=datos_final
+m = matches[!is.na(matches$ace), ]
+numero_valores_faltantes = sum(is.na(m$df))
+numero_valores_faltantes
+players=read.csv("../data/raw-data/atp_players.csv")
+players$appear = ifelse(!is.na(match(players$player_id, unique(m$id))), 1, 0)
+players2=players[players$appear==1, ]
+#Eliminamos la columna appear
+players2=players2[, -c(8)]
+#Eliminamos el ranking de dobles y su ID de Wikidata
+players2=players2[, -c(8)]
+```
+
+We reassign the variable **players2** so that the name describes it better, and we begin creating new variables that are the sum of match statistics and calculating new ones. We will start with total appearances, which are the matches played (**appearences**). We will then continue with each of these variables: **wins**, total wins; **loses**, total losses; **win_per**, win percentage; **aces**, aces; **df**, double faults; **svpt**, service points; **X1stIn**, first serves in; **%1stIn**, percentage of first serves in; **X1stWon**, points won on first serve; **%1stWon**, percentage of points won when playing with first serve; **%2ndIn**, percentage of second serves in; **X2ndWon**, points won on second serve; **%2ndWon**, percentage of points won when playing with second serve; **SvGms**, total service games; **bpSaved**, break points saved; **bpFaced**, break points faced; **bpConc**, break points conceded; **%bpSaved**, percentage of break points saved; **SvGmWon**, service games won; **%SvGmWon**, percentage of service games won.
+
+```{r}
+playersTotal=players2
+frecuenciaTotal = table(m$id)
+head(frecuenciaTotal, 5)
+playersTotal$appearences = frecuenciaTotal[names(frecuenciaTotal)==playersTotal$player_id]
+#Victorias
+winsTotal = table(m$id[m$player_type=='winner'])
+winning_players=names(winsTotal)
+playersTotal$wins = 0
+playersTotal$wins[playersTotal$player_id %in% winning_players] = winsTotal[winning_players]
+#Derrotas
+playersTotal$loses=playersTotal$appearences-playersTotal$wins
+#% de
+playersTotal$win_per=playersTotal$wins/playersTotal$appearences*100
+playersTotal$win_per=round(playersTotal$win_per, 2)
+library(dplyr)
+#Aces
+tabla_aces = aggregate(ace ~ id, matches, sum)
+playersTotal$aces=tabla_aces$ace[playersTotal$player_id==tabla_aces$id]
+#Dobles Faltas
+tabla_df = aggregate(df ~ id, matches, sum)
+playersTotal$df=tabla_df$df[playersTotal$player_id==tabla_df$id]
+#Puntos de servicio
+tabla_svpt = aggregate(svpt ~ id, matches, sum)
+playersTotal$svpt=tabla_svpt$svpt[playersTotal$player_id==tabla_svpt$id]
+#Cambiamos los nombres de las variables que empiezan con numero
+colnames(matches)[colnames(matches) == "1stIn"] = "X1stIn"
+colnames(matches)[colnames(matches) == "1stWon"] = "X1stWon"
+colnames(matches)[colnames(matches) == "2ndWon"] = "X2ndWon"
+#Primeros saques metidos 
+tabla_X1stIn = aggregate(X1stIn ~ id, matches, sum)
+playersTotal$X1stIn=tabla_X1stIn$X1stIn[playersTotal$player_id==tabla_X1stIn$id]
+#% de primeros saques metidos
+playersTotal$`%1stIn`=round(playersTotal$X1stIn/playersTotal$svpt*100, 2)
+#Primeros saques ganados
+tabla_X1stWon = aggregate(X1stWon ~ id, matches, sum)
+playersTotal$X1stWon=tabla_X1stWon$X1stWon[playersTotal$player_id==tabla_X1stWon$id]
+#% de primeros saques ganados
+playersTotal$`%1stWon`=round(playersTotal$X1stWon/playersTotal$X1stIn*100, 2)
+#Segundos saques metidos 
+playersTotal$X2ndIn=playersTotal$svpt - playersTotal$X1stIn - playersTotal$df
+#Segundos saques ganados
+tabla_X2ndWon = aggregate(X2ndWon ~ id, matches, sum)
+playersTotal$X2ndWon=tabla_X2ndWon$X2ndWon[playersTotal$player_id==tabla_X2ndWon$id]
+#% de segundos saques ganados 
+playersTotal$`%2ndWon`=round(playersTotal$X2ndWon/playersTotal$X2ndIn*100,2)
+#Juegos de servicios
+tabla_SvGms = aggregate(SvGms ~ id, matches, sum)
+playersTotal$SvGms=tabla_SvGms$SvGms[playersTotal$player_id==tabla_SvGms$id]
+#Puntos de break salvados
+tabla_bpSaved = aggregate(bpSaved ~ id, matches, sum)
+playersTotal$bpSaved=tabla_bpSaved$bpSaved[playersTotal$player_id==tabla_bpSaved$id]
+#Puntos de break 
+tabla_bpFaced = aggregate(bpFaced ~ id, matches, sum)
+playersTotal$bpFaced=tabla_bpFaced$bpFaced[playersTotal$player_id==tabla_bpFaced$id]
+#Puntos de break concedidos
+playersTotal$bpConc=playersTotal$bpFaced - playersTotal$bpSaved
+#% de puntos de break salvados
+playersTotal$`%bpSaved`=round(playersTotal$bpSaved/playersTotal$bpFaced*100,2)
+#Juegos de servicio ganados
+playersTotal$SvGmsWon=playersTotal$SvGms-playersTotal$bpConc
+#% de uegos de servicio ganados
+playersTotal$`%SvGmsWon`=round(playersTotal$SvGmsWon/playersTotal$SvGms*100, 2)
+head(playersTotal,5)
+```
+
+#### 4.1. **Best servers**
+
+We will create a horizontal bar chart showing the 50 players with the best ace ratio (with a minimum of 100 matches played to ensure the data is meaningful).
+
+```{r}
+players_filtrados = playersTotal[playersTotal$appearences >= 100, ]
+
+players_ordenados = players_filtrados[order(players_filtrados$aces / players_filtrados$df, 
+                                             players_filtrados$player_id, decreasing = TRUE), ]
+
+top_50_jugadores = head(players_ordenados, 50)
+
+ggplot(top_50_jugadores, aes(x = reorder(name_last, aces / df), y = aces / df)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(
+    title = "Top 50 players with the best ace-to-double fault ratio",
+    x = "Player",
+    y = "Ace-to-double fault ratio"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+top_50_jugadores
+```
+
+Once the previous chart is obtained, we create a scatter plot that represents the proportion of double faults relative to the total number of aces. With this, we can visualize the 50 best servers on the ATP tour.
+
+```{r}
+library(ggplot2)
+
+ggplot(top_50_jugadores, aes(x = df / aces, y = aces, label = name_last)) +
+  geom_point() +
+  geom_text(aes(x = df / aces, y = aces), nudge_x = 0, nudge_y = -100, size = 2.5, vjust = 1) +
+  labs(
+    title = "Proportion of double faults relative to total aces",
+    x = "Double fault proportion",
+    y = "Total aces"
+  ) +
+  theme_minimal()
+```
+
+#### 4.1. **Wins by country**
+
+Bar chart representing the 30 countries with the most wins
+
+```{r}
+victorias_por_pais = aggregate(wins ~ ioc, data = playersTotal, sum)
+
+victorias_por_pais = victorias_por_pais[order(victorias_por_pais$wins, decreasing = TRUE), ]
+
+top_30_paises = head(victorias_por_pais, 30)
+
+ggplot(top_30_paises, aes(x = reorder(ioc, wins), y = wins)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(
+    title = "Top 30 countries with the most wins",
+    x = "Country",
+    y = "Total number of wins"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Scatter plot that visualizes the proportion of wins relative to total wins. These would be the 30 countries whose players dominate the ATP tour the most.
+
+```{r}
+partidos_por_pais = aggregate(appearences ~ ioc, data = playersTotal, sum)
+
+victorias_por_pais = aggregate(wins ~ ioc, data = playersTotal, sum)
+
+datos_paises = merge(partidos_por_pais, victorias_por_pais, by = "ioc")
+
+datos_paises$proporcion_victorias = datos_paises$wins / datos_paises$appearences
+
+datos_paises = datos_paises[order(datos_paises$wins, decreasing = TRUE), ]
+
+top_30_paises = head(datos_paises, 30)
+
+ggplot(top_30_paises, aes(x = wins, y = proporcion_victorias, label = ioc)) +
+  geom_point() +
+  geom_text(nudge_x = 10, nudge_y = 0.005, size = 3) +  # Adjust the position of the labels
+  labs(
+    title = "Comparison of total wins with win ratio by country",
+    x = "Total wins",
+    y = "Win ratio"
+  ) +
+  theme_minimal()
+```

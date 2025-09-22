@@ -1,0 +1,515 @@
+---
+title: "PCA (Principal Component Analysis) & Clustering"
+output:
+  html_document:
+    toc: true
+    toc_depth: '4'
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    df_print: paged
+  word_document:
+    toc: true
+    toc_depth: '4'
+  pdf_document:
+    toc: true
+    toc_depth: 4
+---
+
+#### **Table of Contents**:
+
+1.  Loading the libraries  
+2.  Loading the data  
+3.  Principal Component Analysis (PCA)  
+    - 3.1. PCA data selection  
+    - 3.2. Selection of the number of principal components  
+    - 3.3. Detection of outliers (Hotelling’s T2)  
+    - 3.4. Contribution of variables by component  
+    - 3.5. Variable plot or loadings  
+    - 3.6. Individual scores plot and player distribution  
+4.  Clustering Analysis  
+    - 4.1. Selection of the optimal number of *clusters*  
+        - 4.1.1. Ward’s method  
+        - 4.1.2. Average linkage method  
+        - 4.1.3. K-means method  
+        - 4.1.4. K-medoids method  
+    - 4.2. Selection and validation of the clustering method  
+    - 4.3. Interpretation of clustering results  
+5.  Final conclusions
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Loading the libraries
+
+```{r carga liberías, message=FALSE, warning=FALSE}
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+library(dplyr)
+library(knitr)
+library(grid)
+library(gridExtra)
+library(writexl)
+library(readxl)
+library(cluster)
+library(NbClust)
+```
+
+These libraries will be used together to perform principal component analysis (PCA) and clustering techniques. They allow loading and manipulating data, performing statistical analyses, creating a variety of detailed graphical visualizations to interpret the analysis results, and finally preparing and exporting the results for presentation or further analysis. 
+
+## 2. Loading the data
+
+```{r carga datos}
+playersTotal_Avg = read_excel("../data/processed-data/PlayersTotal.xlsx")
+```
+
+## 3. Principal Component Analysis
+
+```{r appearences}
+summary(playersTotal_Avg$appearences)
+```
+
+We select the data of those players who have played at least 20 matches in total in their careers. This is because a small number of matches may not adequately capture a player’s skills and true performance. By limiting the analysis to players with at least 20 matches played, we ensure that the calculated statistics are representative and not biased by a small sample size.
+
+### 3.1. PCA data selection
+
+```{r datos_pca}
+datos_pca = playersTotal_Avg[playersTotal_Avg$appearences >= 20,]
+```
+
+To carry out the Principal Component Analysis (PCA), we have selected the following variables from the dataset:
+
+```{r sel var pca}
+datos_pca = datos_pca[, c("name_first","name_last","win_per", "aces", "df", "%1stWon", "%2ndWon",
+                                  "SvGms", "bpFaced", "aces_resto", "df_resto", "%1stWon_resto", "%2ndWon_resto",
+                                  "RestoGmsWon", "%bpSaved", "bpFaced_resto", "%bpWon_resto")]
+```
+
+We selected these variables due to their relevance in capturing the different aspects of players’ performance and playing style.
+
+To perform the Principal Component Analysis, we applied PCA to the selected variables from the dataset (excluding player names), scaling the variables so that they have unit variance. Afterwards, we calculated the eigenvalues of the principal components to assess the amount of variance explained by each one. We used a *scree plot* to visualize these values and determined the optimal number of principal components to consider. In the plot, the horizontal line indicates the average explained variance, which helps identify the components that explain more variance than the mean, providing guidance for selecting significant components.
+
+### 3.2. Selection of the number of principal components
+
+```{r scree plot pca, fig.align='center', fig.height= 5, fig.width= 8}
+res.pca = PCA(datos_pca[,3:ncol(datos_pca)], scale.unit = TRUE, graph = FALSE)
+eig.val = get_eigenvalue(res.pca)
+VPmedio = 100 * (1/nrow(eig.val))
+fviz_eig(res.pca, addlabels = TRUE, ncp = 10) + 
+         geom_hline(yintercept=VPmedio, linetype=2, color="red")
+```
+From the plot we will use two principal components. The choice of two components is justified using the elbow criterion, as can be observed in the *scree plot*. This criterion consists of identifying the point where the variance explained by the principal components stops decreasing significantly, forming an "elbow" in the graph. In our plot, we see that the first principal component explains 38.6% of the variance and the second explains 27.5%. Starting from the third component, the additional explained variance decreases more gradually. The inflection point, or "elbow," is clearly found after the second component. Therefore, we select the first two principal components, as they capture most of the variance (61.9%).
+
+```{r dos componentes}
+K = 2
+res.pca = PCA(datos_pca[,3:ncol(datos_pca)], scale.unit = TRUE, graph = FALSE, ncp = K)
+```
+
+### 3.3. Detection of outliers (Hotelling’s T2)
+
+```{r t2, fig.align='center', fig.width= 9, fig.height=4}
+# Gráfico T2 Hotelling
+misScores = res.pca$ind$coord[,1:K]
+miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
+I = nrow(datos_pca)
+F95 = K*(I**2 - 1)/(I*(I - K)) * qf(0.95, K, I-K)
+F99 = K*(I**2 - 1)/(I*(I - K)) * qf(0.99, K, I-K)
+
+plot(1:length(miT2), miT2, type = "p", xlab = "Players", ylab = "T2")
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+```
+We have now implemented a Hotelling’s T2 plot to identify tennis players with anomalous performances. We calculated the PCA scores and the T2 values for each player using the sum of squared scores, normalized by the corresponding eigenvalues (miT2). We determined the 95% (F95) and 99% (F99) significance thresholds based on the F distribution to identify observations considered anomalous. We plotted the T2 values for each player on the Y-axis, with the players ordered on the X-axis. Horizontal lines were added for the 95% significance threshold (in orange) and the 99% threshold (in red). We identified the players whose T2 values exceed the 99% threshold (anomalous). Finally, we extracted and displayed the names of the anomalous players using the identified indices.
+
+```{r}
+anomalas = which(miT2 > F99)
+nombres_anomalos = datos_pca[anomalas, c("name_first", "name_last")]
+knitr::kable(nombres_anomalos)
+```
+
+Players whose T2 values exceed the 99% threshold (red line) are considered extreme outliers, suggesting that their performance is significantly different from the average. The players identified as outliers include notable names such as Rafael Nadal, Roger Federer, Novak Djokovic, and Carlos Alcaraz, among others. These players exhibit unique or exceptional performance characteristics that clearly set them apart from the rest of the dataset. The anomalies are mainly due to outstanding skills, particular playing styles, and consistently high performance. 
+
+### 3.4. Contribution of variables by component
+
+```{r contrib 2 comp, fig.align='center', fig.height=4}
+p1 = fviz_contrib(res.pca, choice = "var", axes = 1, top = 15)
+p2 = fviz_contrib(res.pca, choice = "var", axes = 2, top = 15)
+gridExtra::grid.arrange(p1,p2,nrow = 1)
+```
+We used the functions **fviz_contrib** and **gridExtra::grid.arrange** to visualize the contribution of the variables to the first two principal components of the PCA. First, we created a plot showing the contribution of the 15 most influential variables to the first dimension (Dim-1), and then another plot for the second dimension (Dim-2). Finally, we combined both plots in a two-column layout to facilitate comparison.
+
+The results indicate that, for the first component, the most influential variables are mainly related to return efficiency, such as %1stWon_resto, RestoGmsWon, %2ndWon_resto, or *aces*. These variables reflect the players’ defensive and returning ability. On the other hand, in the second dimension, the most important variables include win_per, %2ndWon, and %bpSaved, which focus more on overall performance and service efficiency, highlighting the players’ offensive and serving skills.
+
+### 3.5. Variable plot or *loadings*
+
+```{r loading plot, fig.align='center', fig.width=5,fig.height=5}
+fviz_pca_var(res.pca, axes = c(1,2), repel = TRUE, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+```
+We used the function **fviz_pca_var** to visualize the contribution of the variables in the space defined by the two principal components. In addition, we colored the variables according to their contribution to these dimensions.
+
+The results show how the variables are distributed in the space formed by the two principal components. Variables such as %1stWon_resto, RestoGmsWon, %2ndWon_resto, and win_per are strongly associated with dimensions 1 and 2, indicating that they have a high contribution in differentiating players’ playing styles. These variables are key to capturing both offensive and defensive skills of the players. The visualization also allows us to see that some variables, such as aces_resto and df, have a lower contribution, reflecting that they have less influence in differentiating playing styles in the context of our analysis.
+
+The second principal component is strongly influenced by variables such as win_per, %2ndWon, and %bpSaved. These variables are oriented toward the positive end of Dim-2, suggesting that this dimension captures key aspects of overall performance and service efficiency. Specifically, win_per (win percentage) indicates the player’s overall success in matches, while %2ndWon (percentage of points won on the second serve) and %bpSaved (percentage of break points saved) reflect the player’s ability to maintain control and recover points in critical situations. In summary, the second principal component distinguishes players based on their efficiency in high-pressure situations and their ability to win key points.
+
+### 3.6. Individual plot or *scores*
+
+Using the **which** function, we now search for the rows that match the names and surnames of these players and save the corresponding indices. We will use these indices to highlight or individually analyze the performance and characteristics of these specific players in the PCA.
+
+```{r tenistas índices}
+nadal_index = which(datos_pca$name_first == "Rafael" & datos_pca$name_last == "Nadal")
+karlovic_index = which(datos_pca$name_first == "Ivo" & datos_pca$name_last == "Karlovic")
+djokovic_index = which(datos_pca$name_first == "Novak" & datos_pca$name_last == "Djokovic")
+federer_index = which(datos_pca$name_first == "Roger" & datos_pca$name_last == "Federer")
+alcaraz_index = which(datos_pca$name_first == "Carlos" & datos_pca$name_last == "Alcaraz")
+agassi_index = which(datos_pca$name_first == "Andre" & datos_pca$name_last == "Agassi")
+tsitsipas_index = which(datos_pca$name_first == "Stefanos" & datos_pca$name_last == "Tsitsipas")
+sinner_index = which(datos_pca$name_first == "Jannik" & datos_pca$name_last == "Sinner")
+medvedev_index = which(datos_pca$name_first == "Daniil" & datos_pca$name_last == "Medvedev")
+tiafoe_index = which(datos_pca$name_first == "Frances" & datos_pca$name_last == "Tiafoe")
+isner_index = which(datos_pca$name_first == "John" & datos_pca$name_last == "Isner")
+```
+
+```{r score plot}
+fviz_pca_ind(res.pca,
+             geom.ind = "point",  
+             col.ind = "grey",  
+             palette = c("black", "red"),  
+             addEllipses = TRUE,  
+             label = "none") +  
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[nadal_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[nadal_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "#E7B800") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[nadal_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[nadal_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[nadal_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "#E7B800") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[karlovic_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[karlovic_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "#00AFBB") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[karlovic_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[karlovic_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[karlovic_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 0.5, vjust = 1.5, color = "#00AFBB") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[djokovic_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[djokovic_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),
+             size = 5, color = "#F34333") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[djokovic_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[djokovic_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[djokovic_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "#F34333") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[federer_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[federer_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "green") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[federer_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[federer_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[federer_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "green") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[alcaraz_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[alcaraz_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "orange") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[alcaraz_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[alcaraz_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[alcaraz_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "orange") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[agassi_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[agassi_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "violet") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[agassi_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[agassi_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[agassi_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "violet") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[tsitsipas_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[tsitsipas_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "black") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[tsitsipas_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[tsitsipas_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[tsitsipas_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "black") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[sinner_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[sinner_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "blue") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[sinner_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[sinner_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[sinner_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "blue") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[medvedev_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[medvedev_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "pink") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[medvedev_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[medvedev_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[medvedev_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "pink") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[isner_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[isner_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "#1e7135") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[isner_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[isner_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[isner_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "#1e7135") +
+  geom_point(data = data.frame(Dim.1 = res.pca$ind$coord[tiafoe_index, "Dim.1"],
+                               Dim.2 = res.pca$ind$coord[tiafoe_index, "Dim.2"]),
+             aes(x = Dim.1, y = Dim.2),  
+             size = 5, color = "#b500d1") +  
+  geom_text(data = data.frame(Dim.1 = res.pca$ind$coord[tiafoe_index, "Dim.1"],
+                              Dim.2 = res.pca$ind$coord[tiafoe_index, "Dim.2"],
+                              label = paste(datos_pca$name_last[tiafoe_index])),
+            aes(x = Dim.1, y = Dim.2, label = label), 
+            hjust = 1.5, vjust = 1.5, color = "#b500d1")
+```
+
+In the individual or *scores* plot, we can see how the players are distributed in the space defined by the two PCA dimensions. The tennis players are positioned according to their playing styles and skills. For example, Federer, Novak Djokovic, and Rafael Nadal are located close to each other in the upper right quadrant, indicative of high performance both in serving and in returning, represented by their proximity to the variables in the biplot. Ivo Karlovic and John Isner are far from the main group and positioned more towards the extreme of Dim-1, highlighting their serve-centered playing style, characterized by high numbers of *aces* and lower return efficiency. Stefanos Tsitsipas and Frances Tiafoe are more dispersed, indicating that their playing styles are not as strongly associated with the components, showing diversity in their skills.
+
+## 4. Clustering Analysis
+
+```{r c1, warning=FALSE}
+players = playersTotal_Avg[playersTotal_Avg$appearences >= 20, ]
+datos_clust2 = players[, c( "win_per", "aces", "df", "%1stWon", "%2ndWon",
+                            "SvGms", "bpFaced", "aces_resto", "df_resto", "%1stWon_resto", 
+                            "%2ndWon_resto","RestoGmsWon", "%bpSaved", "bpFaced_resto", 
+                            "%bpWon_resto")]
+rownames(datos_clust2) = paste(players$name_first, players$name_last)
+datos_clust=scale(datos_clust2, center = TRUE, scale = TRUE)
+datos_clust = as.data.frame(datos_clust)
+```
+
+### 4.1 Selection of the optimal number of *clusters*
+
+```{r selección 1, fig.align='center', fig.width=6, fig.height=4}
+midist = get_dist(datos_clust, stand = FALSE, method = "euclidean")
+fviz_dist(midist, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), 
+          show_labels = FALSE)
+```
+
+The chart shows the Euclidean distance between each pair of players in the dataset. The lighter-colored cells (closer to white) indicate that the players have similar performance profiles. The darker-colored cells (closer to blue or red) indicate that the players have more different performance profiles. This chart helps us identify groups of players with similar playing styles. The visual interpretation can be subjective and not precise. For a more accurate determination of the number of *clusters*, we will use Ward’s method together with the Silhouette coefficient.
+
+#### 4.1.1 Ward’s Method:
+
+The first method uses hierarchical clustering with Ward’s method, evaluating the optimal number of clusters. The silhouette width suggests that the optimal number of clusters is 2, since this point shows the highest value. The WSS plot shows a significant decrease in the within-group sum of squares up to 3 clusters, after which the decrease becomes more gradual.
+
+```{r ward1, fig.align='center', fig.width= 7, fig.height=3}
+p1 = fviz_nbclust(x = datos_clust, FUNcluster = hcut, method = "silhouette", 
+                  hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Optimum number of clusters")
+p2 = fviz_nbclust(x = datos_clust, FUNcluster = hcut, method = "wss", 
+                  hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Optimum number of clusters")
+grid.arrange(p1, p2, nrow = 1)
+```
+Let’s use a PCA scores plot applied to the data to see how the tennis players are grouped into clusters according to the two principal components.
+
+```{r ward2, fig.align='center', fig.width=6, fig.height=4}
+clust_ward = hclust(midist, method="ward.D2")
+grupos_ward = cutree(clust_ward, k=3)
+fviz_cluster(object = list(data=datos_clust, cluster=grupos_ward), stand = FALSE,
+             ellipse.type = "convex", geom = "point", show.clust.cent = FALSE,
+             labelsize = 8)  +
+  labs(title = "Hierarchical model + PCA projection",
+       subtitle = "Euclidean distance, Ward method, K=3") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+The visualization indicates a clear separation between the clusters, with most observations consistently grouped within each cluster. The clusters appear to be well defined, suggesting that Ward’s method is effective in identifying homogeneous groups in the data. It could be an appropriate method.
+
+#### 4.1.2 Average linkage method
+
+The second method is also hierarchical and is the average linkage method, evaluating the same criteria. The silhouette width suggests that 2 is the optimal number of clusters. The WSS plot shows a significant decrease up to 3 clusters, with a more gradual decrease afterwards.
+
+
+```{r media1, fig.align='center', fig.width= 7, fig.height=3}
+p1 = fviz_nbclust(x = datos_clust, FUNcluster = hcut, method = "silhouette", 
+                  hc_method = "average", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Optimum number of clusters")
+p2 = fviz_nbclust(x = datos_clust, FUNcluster = hcut, method = "wss", 
+                  hc_method = "average", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Optimum number of clusters")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+```{r media22, fig.align='center', fig.width=6, fig.height=4}
+clust_media = hclust(midist, method="average")
+grupos_media = cutree(clust_media, k = 3)
+
+fviz_cluster(object = list(data=datos_clust, cluster=grupos_media), stand = FALSE,
+             ellipse.type = "convex", geom = "point", show.clust.cent = FALSE,
+             labelsize = 8)  +
+  labs(title = "Hierarchical model + PCA projection",
+       subtitle = "Euclidean distance, Average linkage method, K=2") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+The chart shows that although the clusters are defined, there is a clear dominance of the first cluster, with the other two clusters being much smaller and possibly indicating specific subgroups within the data. This method will be discarded.
+
+#### 4.1.3 K-means method
+
+The third method is a partitioning method and is the K-means method. The silhouette width suggests that 2 clusters is optimal, similar to the hierarchical methods. The WSS plot shows a significant decrease up to 3 clusters, with a more gradual decrease afterwards.
+
+```{r kmedias1, fig.align='center', fig.width= 7, fig.height=3}
+p1 = fviz_nbclust(x = datos_clust, FUNcluster = kmeans, method = "silhouette", 
+             k.max = 10, verbose = FALSE) +
+  labs(title = "K-means")
+p2 = fviz_nbclust(x = datos_clust, FUNcluster = kmeans, method = "wss", 
+             k.max = 10, verbose = FALSE) +
+  labs(title = "K-means")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+```{r kmedias2, fig.align='center', fig.width=8, fig.height=4}
+res.nbclust = NbClust(data = datos_clust, diss = midist, distance = NULL, 
+                        min.nc = 2, max.nc = 6, 
+                        method = "kmeans", index ="all") 
+```
+
+In this case, the optimal number of clusters according to NbClust (the most voted) is 3. Thus, this confirms our previous choice.
+
+```{r kmedias3, fig.align='center', fig.width=6, fig.height=4}
+set.seed(100)
+clust_k_medias = kmeans(datos_clust, centers = 3, nstart = 20)
+p1 = fviz_cluster(object = list(data=datos_clust, cluster=clust_k_medias$cluster), stand = FALSE,
+             ellipse.type = "convex", geom = "point", show.clust.cent = FALSE,
+             labelsize = 8)  +
+  labs(
+        title = "K-means + PCA projection",
+        subtitle = "Euclidean distance, K=3") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+p2 = fviz_cluster(object = list(data=datos_clust, cluster=clust_k_medias$cluster), stand = FALSE,
+             ellipse.type = "convex", geom = "point", show.clust.cent = FALSE,
+             labelsize = 8, axes = 3:4)  +
+  labs(
+        title = "K-means + PCA projection",
+        subtitle = "Euclidean distance, K=3") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+The PCA projection plot of dimensions 1 and 2 shows a clear separation between the clusters, with each group occupying distinct regions of the PCA space. However, in the projection of dimensions 3 and 4, the separation between the clusters is less clear, which may indicate that the first two dimensions capture most of the variability between the clusters. As we observed when performing the PCA at the beginning, the first two components are the most important. It is an appropriate method.
+
+#### 4.1.4 K-medoids method
+
+The fourth method is a partitioning method and is the K-medoids method, evaluated in the same way. The silhouette width suggests that 2 clusters is optimal, just like the previous methods. The WSS plot shows a significant decrease up to 3 clusters, with a more gradual decrease afterwards as well.
+
+```{r kmedoides1, fig.align='center', fig.width= 7, fig.height=3}
+p1 = fviz_nbclust(x = datos_clust, FUNcluster = pam, method = "silhouette", k.max = 10, verbose = FALSE) +
+                  labs(title = "Optimum number of clusters")
+p2 = fviz_nbclust(x = datos_clust, FUNcluster = pam, method = "wss", k.max = 10, verbose = FALSE) +
+                  labs(title = "Optimum number of clusters")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+```{r kmedoides2, fig.align='center', fig.width=6, fig.height=4}
+clust_k_medoides = pam(datos_clust, k = 3)
+
+p1 = fviz_cluster(object = list(data=datos_clust, cluster=clust_k_medoides$clustering), stand = FALSE,
+             ellipse.type = "convex", geom = "point", show.clust.cent = FALSE,
+             labelsize = 8)  +
+  labs(
+    title = "K-medoids + PCA projection",
+    subtitle = "Euclidean distance, K=3"
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+p2 = fviz_cluster(object = list(data=datos_clust, cluster=clust_k_medoides$clustering), stand = FALSE,
+             ellipse.type = "convex", geom = "point", show.clust.cent = FALSE,
+             labelsize = 8, axes = 3:4)  +
+  labs(
+    title = "K-medoids + PCA projection",
+    subtitle = "Euclidean distance, K=3"
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+grid.arrange(p1, p2, nrow = 1)
+```
+
+The PCA projection plot of dimensions 1 and 2 shows a clear separation between the clusters, with each group occupying distinct regions of the PCA space. However, in the projection of dimensions 3 and 4, the separation between the clusters is less clear, which may indicate that the first two dimensions capture most of the variability between the clusters. It seems to be an appropriate method.
+
+### 4.2 Selection and validation of the clustering method
+
+All methods suggest that 2 clusters is optimal according to the silhouette width. However, according to the within-group sum of squares (WSS), the optimal number of clusters could be 3, since the decrease in WSS is more significant up to this point before becoming more gradual. In view of the previous results, it is difficult to choose one specific method, as they provide similar outcomes in some cases and always yield well-differentiated clusters. To make a decision, we will first analyze the Silhouette coefficient by cluster and by observation (not just the global value as we have done so far):
+
+```{r selección y validación clusterin 1, fig.align='center', fig.width= 10, fig.height= 4}
+par(mfrow = c(1,3))
+plot(silhouette(grupos_ward, midist), col=rainbow(6), border=NA, main = "WARD")
+plot(silhouette(grupos_media, midist), col=rainbow(7), border=NA, main = "AVERAGE")
+plot(silhouette(clust_k_medias$cluster, midist), col=rainbow(6), border=NA, main = "K-MEANS")
+plot(silhouette(clust_k_medoides$clustering, midist), col=rainbow(7), border=NA, main = "K-MEDOIDS")
+```
+In view of the Silhouette coefficients, it seems that the best result is given by the k-means algorithm, since it presents fewer misclassified players (i.e., with a negative coefficient). Therefore, we will choose this method.
+
+### 4.3 Interpretation of the clustering results
+
+```{r selección y validación clusterin 2, fig.align='center', fig.width=8, fig.height=4}
+misclust_k_medias = factor(clust_k_medias$cluster)
+loadings = fviz_pca_var(res.pca, axes = c(1,2), repel = TRUE) +
+                        theme(plot.title = element_text(size = 11))
+scores = fviz_pca_ind(res.pca,
+                      geom.ind = "point",  
+                      habillage = misclust_k_medias,  
+                      label = "none") +
+                      labs(title = "PCA scores plot - K-means method") +
+                      theme(plot.title = element_text(size = 11))
+gridExtra::grid.arrange(scores, loadings, nrow = 1)
+```
+In the plot on the left, we see the projection of the observations in the space defined by the first two principal components (Dim1 and Dim2), colored according to the clusters obtained with the k-means method. The results indicate that the clusters are differentiated mainly by performance in serving and returning, as well as by the ability to face and win break points. The distribution of the clusters suggests that:
+
+- **Cluster 1 (Red):** May represent players with balanced performance but with a slight inclination toward better performance in critical situations, given their position in the plot.  
+- **Cluster 2 (Green):** Likely groups players who excel in their serving performance, especially in first and second serves.  
+- **Cluster 3 (Blue):** Groups players who stand out more in returning and in their ability to win break points.  
+
+To complement or support the above interpretation of the clusters through PCA, we will create a descriptive plot of each cluster’s profile to observe the differences between them. To do this, we will calculate the mean of each variable for each cluster.
+
+```{r}
+mediasCluster = aggregate(datos_clust, by = list("cluster" = misclust_k_medias), mean)[,-1]
+rownames(mediasCluster) = paste0("c",1:3)
+kable(t(round(mediasCluster,2)))
+```
+
+```{r}
+matplot(t(mediasCluster), type = "l", col = c("red", "green", "blue"), ylab = "", xlab = "", lwd = 2,
+        lty = 1, main = "Average cluster profile", xaxt = "n")
+
+axis(side = 1, at = 1:ncol(datos_clust), labels = colnames(datos_clust), las = 2)
+
+legend("topleft", legend = as.character(1:3), col = c("red", "green", "blue"), lwd = 2, ncol = 1, bty = "n")
+```
+
+The chart shows the average profile of the clusters based on the variables we used.
+
+**Cluster 1 (Red):** This cluster has high overall performance, with a high value in win_per (1.01), indicating a high win percentage. They show moderate serving performance, with positive values in %1stWon (0.25) and %2ndWon (0.48), though relatively low in SvGms (0.12). They excel in returning, with high values in %1stWon_resto (0.77), %2ndWon_resto (0.88), and RestoGmsWon (0.94), indicating an excellent ability to win points on the opponent’s serve. They are effective in break points with bpFaced_resto (0.89) and %bpWon_resto (0.65), though with a moderate value in %bpSaved (0.37). In summary, they are complete players with outstanding returning performance and a strong win percentage.
+
+**Cluster 2 (Green):** This cluster has low overall performance, with a negative value in win_per (-0.62), indicating a low win percentage. They show poor serving performance, with negative values in %1stWon (-0.75) and %2ndWon (-0.65), and a low value in SvGms (-0.49). Their returning performance is average, with values close to zero in %1stWon_resto (0.11) and %2ndWon_resto (0.02). They face many break points (bpFaced 0.66) and struggle to save them (%bpSaved -0.67), with low performance in winning break points on return. Therefore, they are players with difficulties both in serving and returning, and a low win percentage.
+
+**Cluster 3 (Blue):** These players have average overall performance, with a slightly negative value in win_per (-0.11). They excel in serving, with high values in %1stWon (0.92) and %2ndWon (0.51), and good performance in SvGms (0.65). They show significant weaknesses in returning, with negative values in %1stWon_resto (-1.02), %2ndWon_resto (-0.99), and RestoGmsWon (-0.97). Although they are effective in saving break points (%bpSaved 0.66), they are not good at winning break points on return (%bpWon_resto -0.88). They are players with strong serving performance but significant weaknesses in returning.
+
+## 5. Final conclusions
+
+The PCA and clustering analysis allowed us to break down the variability of tennis players into groups that highlight the most significant aspects of their performance and playing style. By applying PCA, we reduced the dimensionality of the data while preserving most of the relevant information, which facilitated a clear segmentation using clustering techniques. The resulting clusters revealed distinctive patterns in players’ performance, which can be highly valuable for coaches and sports analysts to optimize strategies and specific training.
