@@ -1,4 +1,4 @@
-# Game, Set & Data 🎾📊
+# 🎾📊 Game, Set & Data
 
 ![R](https://img.shields.io/badge/language-R-blue)
 ![Shiny](https://img.shields.io/badge/framework-Shiny-orange)
